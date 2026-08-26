@@ -1,0 +1,2158 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PIXI_SCHOOL — интерактивная доска</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;800&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<style>
+  :root{
+    /* ===== Палитра PIXI ===== */
+    --bg:#0F0C15;
+    --panel:rgba(24,19,36,.88);
+    --panel-solid:#181324;
+    --border:#332A4A;
+    --border-soft:#282040;
+    --text:#F2EEFA;
+    --muted:#9A91B5;
+    --accent:#8F4BFF;               /* фирменный фиолетовый PIXI */
+    --accent-soft:rgba(143,75,255,.15);
+    --accent-2:#31E8B2;             /* мятный — вторичный акцент */
+    --danger:#FF4D6D;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden}
+  body{
+    font-family:'Golos Text',sans-serif;
+    background:var(--bg);color:var(--text);
+    user-select:none;-webkit-user-select:none;
+  }
+  button{font-family:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  kbd{
+    font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text);
+    background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+    border-bottom-width:2px;border-radius:4px;padding:1px 5px;white-space:nowrap;
+  }
+  .mono{font-family:'JetBrains Mono',monospace}
+
+  /* ---------- Сцена ---------- */
+  .stage{position:fixed;inset:0}
+  .stage canvas{position:absolute;inset:0}
+  #board{z-index:1}
+  #overlay{z-index:2;touch-action:none}
+
+  /* ---------- Тултипы ---------- */
+  [data-tip]{position:relative}
+  [data-tip]::after{
+    content:attr(data-tip);position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%);
+    background:#0B0910;color:#E9E5F5;border:1px solid var(--border);
+    font-size:11px;font-weight:500;padding:5px 8px;border-radius:7px;white-space:nowrap;
+    opacity:0;pointer-events:none;transition:opacity .12s .35s;z-index:60;
+  }
+  [data-tip]:hover::after{opacity:1}
+  .tip-b::after{left:50%;top:calc(100% + 8px);transform:translateX(-50%)}
+  .tip-b-end::after{left:auto;right:0;top:calc(100% + 8px);transform:none}
+
+  /* ---------- Верхняя панель ---------- */
+  .topbar{
+    position:fixed;top:0;left:0;right:0;height:56px;z-index:10;
+    display:flex;align-items:center;gap:8px;padding:0 14px;
+    background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border-bottom:1px solid var(--border-soft);
+  }
+  .brand{display:flex;align-items:center;gap:10px;margin-right:6px}
+  .brand .logo{width:30px;height:30px;flex:none;display:block}
+  .brand-name{
+    font-family:'Unbounded',sans-serif;font-size:12px;font-weight:800;
+    letter-spacing:.16em;color:var(--text);white-space:nowrap;
+  }
+  .brand-name em{font-style:normal;color:var(--accent)}
+  .tb-sep{width:1px;height:24px;background:var(--border);margin:0 4px;flex:none}
+  .tb-btn{
+    width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    color:var(--muted);flex:none;transition:background .12s,color .12s;
+  }
+  .tb-btn svg{width:18px;height:18px}
+  .tb-btn:hover{color:var(--text);background:rgba(255,255,255,.06)}
+  .tb-btn:disabled{opacity:.3;pointer-events:none}
+  .tb-btn.on{color:var(--accent);background:var(--accent-soft)}
+  .zoom-label{
+    width:56px;height:34px;border-radius:9px;font-family:'JetBrains Mono',monospace;
+    font-size:12px;color:var(--text);flex:none;
+  }
+  .zoom-label:hover{background:rgba(255,255,255,.06)}
+  .spacer{flex:1}
+  .tb-btn.primary{
+    width:auto;padding:0 14px;gap:8px;display:flex;align-items:center;
+    background:var(--accent);color:#fff;font-size:13px;font-weight:600;
+  }
+  .tb-btn.primary:hover{background:#A266FF}
+  .tb-btn.primary svg{width:16px;height:16px}
+  .tb-btn.share{
+    width:auto;padding:0 14px;gap:8px;display:flex;align-items:center;
+    background:var(--accent-2);color:#17131F;font-size:13px;font-weight:600;
+  }
+  .tb-btn.share:hover{background:#5AEFC4}
+  .tb-btn.share svg{width:16px;height:16px}
+  #btnClear.armed{background:var(--danger);color:#fff;width:auto;padding:0 12px;font-size:12.5px;font-weight:600}
+  #btnClear.armed svg{display:none}
+  #btnClear .clear-label{display:none}
+  #btnClear.armed .clear-label{display:inline}
+
+  /* ---------- Панель инструментов ---------- */
+  .toolbar{
+    position:fixed;left:14px;top:50%;transform:translateY(-50%);z-index:10;
+    display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:15px;
+    background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border:1px solid var(--border-soft);box-shadow:0 12px 32px rgba(0,0,0,.4);
+  }
+  .tool-btn{
+    width:40px;height:40px;border-radius:10px;display:grid;place-items:center;
+    color:var(--muted);transition:background .12s,color .12s,transform .1s;
+  }
+  .tool-btn svg{width:19px;height:19px}
+  .tool-btn:hover{color:var(--text);background:rgba(255,255,255,.06)}
+  .tool-btn:active{transform:scale(.94)}
+  .tool-btn.active{background:var(--accent);color:#fff}
+  .tb-div{height:1px;background:var(--border);margin:4px 5px}
+
+  /* ---------- Панель свойств ---------- */
+  .props{
+    position:fixed;left:78px;top:72px;z-index:10;width:238px;
+    max-height:calc(100vh - 128px);overflow-y:auto;
+    background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border:1px solid var(--border-soft);border-radius:15px;
+    padding:14px 16px 16px;box-shadow:0 12px 32px rgba(0,0,0,.4);
+  }
+  .props::-webkit-scrollbar{width:8px}
+  .props::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .props-title{font-size:13px;font-weight:600;margin-bottom:12px;letter-spacing:.01em}
+  .p-sec{margin-bottom:14px}
+  .p-sec:last-child{margin-bottom:0}
+  .p-label{
+    display:flex;align-items:center;justify-content:space-between;
+    font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:8px;gap:8px;
+  }
+  .p-val{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text)}
+  .mini-btn{width:22px;height:22px;border-radius:6px;color:var(--muted);display:grid;place-items:center}
+  .mini-btn:hover{color:var(--text);background:rgba(255,255,255,.07)}
+  .mini-btn svg{width:13px;height:13px}
+
+  .swatches{display:grid;grid-template-columns:repeat(7,1fr);gap:7px}
+  .sw{
+    width:23px;height:23px;border-radius:8px;cursor:pointer;position:relative;
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);transition:transform .1s;
+  }
+  .sw:hover{transform:scale(1.12)}
+  .sw.active{box-shadow:0 0 0 2px var(--panel-solid),0 0 0 4px var(--accent)}
+  .sw-none{background:transparent;border:1.5px dashed #3A3152;box-shadow:none}
+  .sw-none::after{
+    content:'';position:absolute;left:2px;right:2px;top:50%;height:1.5px;
+    background:var(--muted);transform:rotate(-45deg);
+  }
+  .sw-custom{background:conic-gradient(#FF4D8D,#FFC53D,#31E8B2,#2CC5FF,#8F4BFF,#FF4D8D);overflow:hidden}
+  .sw-custom input{position:absolute;inset:0;opacity:0;cursor:pointer}
+  .sw-custom .cc{
+    position:absolute;inset:5px;border-radius:5px;background:var(--panel-solid);
+    pointer-events:none;
+  }
+  .sw-custom.active{box-shadow:0 0 0 2px var(--panel-solid),0 0 0 4px var(--accent)}
+
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer}
+  input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:2px;background:var(--border)}
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--text);
+    margin-top:-5.5px;box-shadow:0 1px 5px rgba(0,0,0,.5);border:none;
+  }
+  input[type=range]::-moz-range-track{height:3px;border-radius:2px;background:var(--border)}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--text);border:none;box-shadow:0 1px 5px rgba(0,0,0,.5)}
+
+  .dash-row{display:flex;gap:7px}
+  .dash-btn{
+    flex:1;height:30px;border-radius:8px;border:1px solid var(--border);
+    display:grid;place-items:center;color:var(--muted);transition:border-color .12s;
+  }
+  .dash-btn svg{stroke:currentColor;stroke-width:2.4;stroke-linecap:round}
+  .dash-btn:hover{color:var(--text)}
+  .dash-btn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+
+  /* ---------- Редактор текста ---------- */
+  #textEditor{
+    position:fixed;z-index:5;display:none;
+    background:rgba(251,249,255,.85);color:#241E33;
+    font-family:'JetBrains Mono',monospace;font-weight:500;line-height:1.35;
+    border:none;outline:none;resize:none;overflow:hidden;padding:2px 3px;
+    border-left:2px solid var(--accent);min-width:40px;border-radius:2px;
+    caret-color:var(--accent);
+  }
+  .board-dark #textEditor{background:rgba(23,19,31,.9)}
+  #editorHint{
+    position:fixed;z-index:6;display:none;pointer-events:none;
+    background:#0B0910;color:#B9B0D6;border:1px solid var(--border);
+    font-size:10.5px;padding:4px 9px;border-radius:7px;white-space:nowrap;
+  }
+  #editorHint b{color:#F2EEFA;font-weight:600}
+
+  /* ---------- Статусная строка ---------- */
+  .statusbar{
+    position:fixed;left:0;right:0;bottom:0;height:30px;z-index:10;
+    display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 14px;
+    background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border-top:1px solid var(--border-soft);font-size:11px;color:var(--muted);
+  }
+  .sb-group{display:flex;align-items:center;gap:14px;font-family:'JetBrains Mono',monospace}
+  .sb-group b{color:var(--text);font-weight:500}
+  .sb-brand{color:var(--accent);font-size:10.5px;font-weight:600;letter-spacing:.14em}
+  .sb-hint{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px}
+
+  /* ---------- Подсказка пустого холста ---------- */
+  .empty-hint{
+    position:fixed;left:50%;top:calc(50% - 16px);transform:translate(-50%,-50%);
+    z-index:3;text-align:center;pointer-events:none;color:var(--muted);
+    transition:opacity .3s;
+  }
+  .empty-hint.hidden{opacity:0}
+  .eh-spark{width:26px;height:26px;fill:var(--accent);margin-bottom:10px;opacity:.9}
+  .eh-title{font-family:'Unbounded',sans-serif;font-size:17px;font-weight:600;color:#B7AFCF;letter-spacing:.06em;margin-bottom:9px}
+  .eh-sub{font-size:13px;margin-bottom:14px}
+  .eh-keys{font-size:11.5px;display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap}
+
+  /* ---------- Тосты ---------- */
+  .toasts{
+    position:fixed;bottom:44px;left:50%;transform:translateX(-50%);z-index:70;
+    display:flex;flex-direction:column;gap:8px;align-items:center;
+  }
+  .toast{
+    display:flex;align-items:center;gap:14px;
+    background:#1E1830;border:1px solid var(--border);border-left:3px solid var(--accent);
+    border-radius:10px;padding:10px 16px;font-size:13px;
+    box-shadow:0 10px 28px rgba(0,0,0,.5);
+    animation:toast-in .22s cubic-bezier(.2,.9,.3,1.2);
+  }
+  .toast.out{animation:toast-out .2s forwards}
+  .toast button{color:var(--accent);font-weight:600;font-size:13px}
+  .toast button:hover{text-decoration:underline}
+  @keyframes toast-in{from{opacity:0;transform:translateY(10px)}}
+  @keyframes toast-out{to{opacity:0;transform:translateY(8px)}}
+
+  /* ---------- Шпаргалка ---------- */
+  .help-pop{
+    position:fixed;top:64px;right:14px;z-index:30;width:440px;max-width:calc(100vw - 28px);
+    max-height:calc(100vh - 120px);overflow-y:auto;
+    background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border:1px solid var(--border-soft);border-radius:15px;padding:18px 20px 20px;
+    box-shadow:0 16px 40px rgba(0,0,0,.5);
+    animation:toast-in .18s cubic-bezier(.2,.9,.3,1.1);
+  }
+  .help-pop::-webkit-scrollbar{width:8px}
+  .help-pop::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .help-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .help-head span{font-size:14px;font-weight:600}
+  .help-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 26px}
+  .help-col{display:flex;flex-direction:column}
+  .hk{
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:4px 0;font-size:12px;color:#CDC8DE;
+  }
+  .hk .keys{display:flex;gap:3px}
+
+  /* ---------- Диалог «Поделиться» ---------- */
+  .modal-backdrop{
+    position:fixed;inset:0;z-index:50;padding:16px;
+    background:rgba(8,6,14,.62);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    display:grid;place-items:center;
+  }
+  .modal-backdrop[hidden]{display:none}
+  .modal{
+    width:480px;max-width:100%;
+    background:var(--panel-solid);border:1px solid var(--border);border-radius:16px;
+    padding:20px 22px 22px;box-shadow:0 24px 60px rgba(0,0,0,.55);
+    animation:modal-in .18s cubic-bezier(.2,.9,.3,1.1);
+  }
+  @keyframes modal-in{from{opacity:0;transform:translateY(10px) scale(.98)}}
+  .m-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .m-head span{font-size:15px;font-weight:600}
+  .m-note{font-size:12.5px;color:var(--muted);line-height:1.55;margin-bottom:14px}
+  .m-note b{color:var(--text);font-weight:600}
+  .share-row{display:flex;gap:8px}
+  .share-row input{
+    flex:1;min-width:0;height:38px;padding:0 11px;
+    background:#0F0C15;border:1px solid var(--border);border-radius:9px;
+    color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11.5px;outline:none;
+  }
+  .share-row input:focus{border-color:var(--accent)}
+  .btn-copy{
+    height:38px;padding:0 14px;border-radius:9px;background:var(--accent);color:#fff;
+    font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px;flex:none;
+  }
+  .btn-copy:hover{background:#A266FF}
+  .btn-copy svg{width:15px;height:15px}
+  .share-meta{
+    font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-top:10px;
+  }
+  .qr-wrap{display:flex;flex-direction:column;align-items:center;gap:9px;margin-top:14px}
+  .qr-card{background:#fff;border-radius:12px;padding:9px;line-height:0}
+  .qr-card canvas{width:216px;height:216px;display:block}
+  .qr-wrap>span{font-size:11px;color:var(--muted)}
+  .m-warn{
+    margin-top:14px;font-size:12px;line-height:1.55;color:#FFC53D;
+    background:rgba(255,197,61,.08);border:1px solid rgba(255,197,61,.25);
+    border-radius:10px;padding:10px 12px;
+  }
+
+  @media (max-width:1050px){
+    .sb-hint{display:none}
+    .tb-btn.primary span, .tb-btn.share span{display:none}
+    .tb-btn.primary, .tb-btn.share{width:34px;padding:0}
+    .brand-name{display:none}
+  }
+  @media (max-height:640px){
+    .tool-btn{width:34px;height:34px;border-radius:9px}
+    .tool-btn svg{width:17px;height:17px}
+  }
+</style>
+</head>
+<body>
+
+<!-- Верхняя панель -->
+<header class="topbar">
+  <div class="brand">
+    <!-- Логотип PIXI_SCHOOL: бейдж с «феей-искрой» -->
+    <svg class="logo" viewBox="0 0 34 34" aria-hidden="true">
+      <rect x="1" y="1" width="32" height="32" rx="10" fill="#8F4BFF"/>
+      <path d="M17 6.5 C18.6 12.4 21.6 15.4 27.5 17 C21.6 18.6 18.6 21.6 17 27.5 C15.4 21.6 12.4 18.6 6.5 17 C12.4 15.4 15.4 12.4 17 6.5 Z" fill="#F2EEFA"/>
+      <circle cx="26" cy="8" r="2" fill="#31E8B2"/>
+    </svg>
+    <span class="brand-name">PIXI<em>_SCHOOL</em></span>
+  </div>
+  <div class="tb-sep"></div>
+  <button class="tb-btn tip-b" id="btnUndo" data-tip="Отменить · Ctrl+Z"><i data-lucide="undo-2"></i></button>
+  <button class="tb-btn tip-b" id="btnRedo" data-tip="Повторить · Ctrl+Shift+Z"><i data-lucide="redo-2"></i></button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn tip-b" id="btnZoomOut" data-tip="Уменьшить"><i data-lucide="zoom-out"></i></button>
+  <button class="zoom-label mono tip-b" id="btnZoomReset" data-tip="Масштаб 100% · Shift+2">100%</button>
+  <button class="tb-btn tip-b" id="btnZoomIn" data-tip="Увеличить"><i data-lucide="zoom-in"></i></button>
+  <button class="tb-btn tip-b" id="btnFit" data-tip="Показать всё · Shift+1"><i data-lucide="scan"></i></button>
+  <div class="tb-sep"></div>
+  <button class="tb-btn tip-b" id="btnGrid" data-tip="Сетка"><i data-lucide="grid-3x3"></i></button>
+  <button class="tb-btn tip-b" id="btnSnap" data-tip="Привязка к сетке"><i data-lucide="magnet"></i></button>
+  <button class="tb-btn tip-b" id="btnTheme" data-tip="Фон доски">
+    <i data-lucide="sun" class="ic-sun"></i><i data-lucide="moon" class="ic-moon" style="display:none"></i>
+  </button>
+  <button class="tb-btn tip-b" id="btnHelp" data-tip="Горячие клавиши"><i data-lucide="keyboard"></i></button>
+  <div class="spacer"></div>
+  <button class="tb-btn share tip-b" id="btnShare" data-tip="Поделиться ссылкой на доску"><i data-lucide="share-2"></i><span>Поделиться</span></button>
+  <button class="tb-btn primary tip-b" id="btnExport" data-tip="Сохранить как PNG · Ctrl+E"><i data-lucide="download"></i><span>Экспорт</span></button>
+  <button class="tb-btn tip-b-end" id="btnClear" data-tip="Очистить доску"><i data-lucide="trash-2"></i><span class="clear-label">Точно?</span></button>
+</header>
+
+<!-- Инструменты -->
+<aside class="toolbar" id="toolbar">
+  <button class="tool-btn" data-tool="select"    data-tip="Выделение · V"><i data-lucide="mouse-pointer-2"></i></button>
+  <button class="tool-btn" data-tool="hand"      data-tip="Рука · H"><i data-lucide="hand"></i></button>
+  <div class="tb-div"></div>
+  <button class="tool-btn" data-tool="pen"       data-tip="Кисть · P"><i data-lucide="pencil"></i></button>
+  <button class="tool-btn" data-tool="marker"    data-tip="Маркер · M"><i data-lucide="highlighter"></i></button>
+  <button class="tool-btn" data-tool="eraser"    data-tip="Ластик · E"><i data-lucide="eraser"></i></button>
+  <div class="tb-div"></div>
+  <button class="tool-btn" data-tool="line"      data-tip="Линия · L"><i data-lucide="slash"></i></button>
+  <button class="tool-btn" data-tool="arrow"     data-tip="Стрелка · A"><i data-lucide="arrow-up-right"></i></button>
+  <button class="tool-btn" data-tool="rect"      data-tip="Прямоугольник · R"><i data-lucide="square"></i></button>
+  <button class="tool-btn" data-tool="ellipse"   data-tip="Эллипс · O"><i data-lucide="circle"></i></button>
+  <button class="tool-btn" data-tool="triangle"  data-tip="Треугольник · G"><i data-lucide="triangle"></i></button>
+  <button class="tool-btn" data-tool="polyline"  data-tip="Полилиния · S"><i data-lucide="spline"></i></button>
+  <div class="tb-div"></div>
+  <button class="tool-btn" data-tool="text"      data-tip="Текст · T"><i data-lucide="type"></i></button>
+  <button class="tool-btn" data-tool="laser"     data-tip="Лазерная указка · K"><i data-lucide="zap"></i></button>
+</aside>
+
+<!-- Свойства -->
+<aside class="props" id="propsPanel">
+  <div class="props-title" id="propsTitle">Свойства</div>
+
+  <section class="p-sec" id="secStroke">
+    <div class="p-label"><span id="strokeLabel">Цвет обводки</span>
+      <button class="mini-btn" id="btnPicker" data-tip="Пипетка"><i data-lucide="pipette"></i></button>
+    </div>
+    <div class="swatches" id="strokeSwatches"></div>
+  </section>
+
+  <section class="p-sec" id="secFill">
+    <div class="p-label"><span>Заливка</span></div>
+    <div class="swatches" id="fillSwatches"></div>
+  </section>
+
+  <section class="p-sec" id="secWidth">
+    <div class="p-label"><span id="widthLabel">Толщина</span><span class="p-val" id="widthVal">3</span></div>
+    <input type="range" id="widthRange" min="1" max="48" step="1" value="3">
+  </section>
+
+  <section class="p-sec" id="secDash">
+    <div class="p-label"><span>Штрих</span></div>
+    <div class="dash-row">
+      <button class="dash-btn" data-dash="solid" data-tip="Сплошная"><svg width="26" height="8" viewBox="0 0 28 8"><line x1="2" y1="4" x2="26" y2="4"/></svg></button>
+      <button class="dash-btn" data-dash="dash" data-tip="Пунктир"><svg width="26" height="8" viewBox="0 0 28 8"><line x1="2" y1="4" x2="26" y2="4" stroke-dasharray="6 4.5"/></svg></button>
+      <button class="dash-btn" data-dash="dot" data-tip="Точки"><svg width="26" height="8" viewBox="0 0 28 8"><line x1="2" y1="4" x2="26" y2="4" stroke-dasharray="0.5 5"/></svg></button>
+    </div>
+  </section>
+
+  <section class="p-sec" id="secOpacity">
+    <div class="p-label"><span>Прозрачность</span><span class="p-val" id="opacityVal">100%</span></div>
+    <input type="range" id="opacityRange" min="10" max="100" step="1" value="100">
+  </section>
+</aside>
+
+<!-- Холст -->
+<main class="stage" id="stage">
+  <canvas id="board"></canvas>
+  <canvas id="overlay"></canvas>
+  <textarea id="textEditor" spellcheck="false" wrap="off"></textarea>
+  <div id="editorHint">Enter — новая строка · <b>Ctrl+Enter</b> — готово · <b>Esc</b> — отмена</div>
+  <div class="empty-hint" id="emptyHint">
+    <svg class="eh-spark" viewBox="0 0 24 24"><path d="M12 2 C13.3 7.3 16.7 10.7 22 12 C16.7 13.3 13.3 16.7 12 22 C10.7 16.7 7.3 13.3 2 12 C7.3 10.7 10.7 7.3 12 2 Z"/></svg>
+    <div class="eh-title">ДОСКА ПУСТА</div>
+    <div class="eh-sub">Выберите инструмент слева и нарисуйте первую фигуру</div>
+    <div class="eh-keys"><span><kbd>Shift</kbd> ровные пропорции</span><span><kbd>Alt</kbd> от центра</span><span><kbd>Space</kbd> панорама</span><span><kbd>K</kbd> лазер</span></div>
+  </div>
+</main>
+
+<!-- Статусная строка -->
+<footer class="statusbar">
+  <div class="sb-group">
+    <span class="sb-brand">PIXI_SCHOOL</span>
+    <span>X <b id="sbX">0</b></span>
+    <span>Y <b id="sbY">0</b></span>
+    <span>Зум <b id="sbZoom">100%</b></span>
+    <span>Объектов <b id="sbCount">0</b></span>
+  </div>
+  <div class="sb-hint" id="sbHint"></div>
+</footer>
+
+<!-- Шпаргалка -->
+<div class="help-pop" id="helpPop" hidden>
+  <div class="help-head">
+    <span>Горячие клавиши</span>
+    <button class="tb-btn" id="helpClose"><i data-lucide="x"></i></button>
+  </div>
+  <div class="help-grid">
+    <div class="help-col">
+      <div class="p-label">Инструменты</div>
+      <div class="hk"><span>Выделение</span><kbd>V</kbd></div>
+      <div class="hk"><span>Рука</span><kbd>H</kbd></div>
+      <div class="hk"><span>Кисть</span><kbd>P</kbd></div>
+      <div class="hk"><span>Маркер</span><kbd>M</kbd></div>
+      <div class="hk"><span>Ластик</span><kbd>E</kbd></div>
+      <div class="hk"><span>Линия</span><kbd>L</kbd></div>
+      <div class="hk"><span>Стрелка</span><kbd>A</kbd></div>
+      <div class="hk"><span>Прямоугольник</span><kbd>R</kbd></div>
+      <div class="hk"><span>Эллипс</span><kbd>O</kbd></div>
+      <div class="hk"><span>Треугольник</span><kbd>G</kbd></div>
+      <div class="hk"><span>Полилиния</span><kbd>S</kbd></div>
+      <div class="hk"><span>Текст</span><kbd>T</kbd></div>
+      <div class="hk"><span>Лазерная указка</span><kbd>K</kbd></div>
+    </div>
+    <div class="help-col">
+      <div class="p-label">Действия</div>
+      <div class="hk"><span>Отменить / повторить</span><span class="keys"><kbd>Ctrl+Z</kbd><kbd>Ctrl+Shift+Z</kbd></span></div>
+      <div class="hk"><span>Удалить выделенное</span><kbd>Delete</kbd></div>
+      <div class="hk"><span>Дублировать</span><kbd>Ctrl+D</kbd></div>
+      <div class="hk"><span>На передний / задний план</span><span class="keys"><kbd>Ctrl+]</kbd><kbd>Ctrl+[</kbd></span></div>
+      <div class="hk"><span>Сдвиг на 1 / 10 px</span><span class="keys"><kbd>←↑→↓</kbd><kbd>+Shift</kbd></span></div>
+      <div class="hk"><span>Завершить / отменить текст</span><span class="keys"><kbd>Ctrl+Enter</kbd><kbd>Esc</kbd></span></div>
+      <div class="hk"><span>Экспорт PNG</span><kbd>Ctrl+E</kbd></div>
+      <div class="p-label" style="margin-top:10px">Вид и построение</div>
+      <div class="hk"><span>Панорама</span><span class="keys"><kbd>Space</kbd><kbd>ПКМ</kbd></span></div>
+      <div class="hk"><span>Масштаб</span><kbd>Колесо</kbd></div>
+      <div class="hk"><span>Ровные пропорции / 45°</span><kbd>Shift</kbd></div>
+      <div class="hk"><span>Полилиния: шаг 45°</span><kbd>Shift</kbd></div>
+      <div class="hk"><span>Фигура от центра</span><kbd>Alt</kbd></div>
+      <div class="hk"><span>Показать всё / 100%</span><span class="keys"><kbd>Shift+1</kbd><kbd>Shift+2</kbd></span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Диалог «Поделиться» -->
+<div class="modal-backdrop" id="sharePop" hidden>
+  <div class="modal">
+    <div class="m-head">
+      <span>Поделиться доской</span>
+      <button class="tb-btn" id="shareClose"><i data-lucide="x"></i></button>
+    </div>
+    <p class="m-note">
+      Вся доска упакована <b>прямо в ссылку</b> — получатель откроет её в браузере,
+      сервер и аккаунты не нужны. Ссылка фиксирует текущий снимок доски;
+      чтобы ей могли пользоваться другие, разместите эту страницу в интернете
+      (GitHub&nbsp;Pages, школьный сервер) — один раз.
+    </p>
+    <div class="share-row">
+      <input id="shareLink" readonly spellcheck="false">
+      <button class="btn-copy" id="btnCopyLink"><i data-lucide="copy"></i><span>Копировать</span></button>
+    </div>
+    <div class="share-meta" id="shareMeta"></div>
+    <div class="qr-wrap" id="qrWrap">
+      <div class="qr-card"><canvas id="qrCanvas" width="432" height="432"></canvas></div>
+      <span>Наведите камеру телефона — доска откроется по QR</span>
+    </div>
+    <div class="m-warn" id="shareWarn" hidden></div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+'use strict';
+/* ============================================================
+   PIXI_SCHOOL — векторная интерактивная доска
+   Все фигуры хранятся как векторные примитивы: это даёт
+   честную историю (undo/redo), выделение, трансформацию,
+   качественный экспорт и передачу доски прямо в ссылке.
+   ============================================================ */
+
+const $ = s => document.querySelector(s);
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const TAU = Math.PI*2;
+let uid = 1; const nid = ()=>'s'+(uid++);
+
+function segDist(px,py,x1,y1,x2,y2){
+  const dx=x2-x1, dy=y2-y1, l2=dx*dx+dy*dy;
+  let t = l2 ? ((px-x1)*dx+(py-y1)*dy)/l2 : 0;
+  t = clamp(t,0,1);
+  return Math.hypot(px-(x1+t*dx), py-(y1+t*dy));
+}
+function pointInPoly(x,y,pts){
+  let inside=false;
+  for(let i=0,j=pts.length-1;i<pts.length;j=i++){
+    const a=pts[i], b=pts[j];
+    if((a.y>y)!==(b.y>y) && x < (b.x-a.x)*(y-a.y)/(b.y-a.y)+a.x) inside=!inside;
+  }
+  return inside;
+}
+
+/* ---------- Состояние ---------- */
+const cam = {x:0, y:0, z:1};                      // камера (пан/зум)
+let shapes = [];                                   // векторные объекты
+let selection = new Set();                         // выделенные объекты
+let tool = 'pen';                                  // активный инструмент
+let action = null;                                 // текущий жест (рисование/пан/…)
+let draft = null;                                  // фигура-черновик
+let polygonDraft = null;                           // точки полилинии
+let hoverShape = null;
+let spaceHeld = false;
+let lastMouse = {sx:0, sy:0, wx:0, wy:0, inside:false, shift:false};
+let grid = {show:true, snap:false};
+let boardTheme = 'light';
+const props = {stroke:'#241E33', fill:null, width:3, size:26, dash:'solid', opacity:1};
+const FILLABLE = new Set(['rect','ellipse','triangle']);
+/* Палитра PIXI: чернильный фиолетовый, фирменный, глубокий, розовый, мятный и др. */
+const PALETTE = ['#241E33','#7A7392','#FFFFFF','#8F4BFF','#6A3AC9','#FF4D8D','#FF7847','#FFC53D','#31E8B2','#2CC5FF','#3D7BFA','#8B5A2B'];
+const DASH = {
+  solid: w=>[],
+  dash:  w=>[w*3.2, w*2.4],
+  dot:   w=>[0.01, w*2.2],
+};
+const ACCENT = '#8F4BFF';
+const BOARD_BG = {light:'#FBF9FF', dark:'#17131F'};                 // лавандовая «бумага» / тёмная
+const GRID_DOT = {light:'rgba(36,30,51,.16)', dark:'rgba(242,238,250,.13)'};
+
+const HINTS = {
+  select:'Клик — выделить · рамкой — группа · двойной клик по тексту — правка · Delete — удалить',
+  hand:'Перетаскивайте холст · колесо мыши — масштаб',
+  pen:'Рисуйте свободно — штрихи сглаживаются',
+  marker:'Полупрозрачный штрих для пометок',
+  eraser:'Проведите по фигуре, чтобы удалить её целиком',
+  line:'Потяните из точки в точку · Shift — углы 45°',
+  arrow:'Потяните, чтобы построить стрелку · Shift — углы 45°',
+  rect:'Потяните · Shift — квадрат · Alt — от центра',
+  ellipse:'Потяните · Shift — круг · Alt — от центра',
+  triangle:'Потяните · Shift — равносторонний · Alt — от центра',
+  polyline:'Клик — точка · Shift — углы кратно 45° · двойной клик / Enter — завершить · Esc — отменить',
+  text:'Клик по холсту — новый текст · клик по существующему тексту — правка · Ctrl+Enter — готово',
+  laser:'Удерживайте и ведите — след растает за секунду',
+};
+const TOOL_NAMES = {
+  select:'Выделение', hand:'Рука', pen:'Кисть', marker:'Маркер', eraser:'Ластик',
+  line:'Линия', arrow:'Стрелка', rect:'Прямоугольник', ellipse:'Эллипс',
+  triangle:'Треугольник', polyline:'Полилиния', text:'Текст', laser:'Лазерная указка',
+};
+
+/* ---------- Холсты ---------- */
+const stage=$('#stage'), board=$('#board'), overlay=$('#overlay');
+const bctx=board.getContext('2d'), octx=overlay.getContext('2d');
+let dpr=1, W=0, H=0;
+
+function resize(){
+  dpr = window.devicePixelRatio||1;
+  W = window.innerWidth; H = window.innerHeight;
+  for(const c of [board,overlay]){
+    c.width=W*dpr; c.height=H*dpr;
+    c.style.width=W+'px'; c.style.height=H+'px';
+  }
+  invalidate();
+}
+
+const worldOf  = (sx,sy)=>({x:(sx-cam.x)/cam.z, y:(sy-cam.y)/cam.z});
+const screenOf = (wx,wy)=>({x:wx*cam.z+cam.x, y:wy*cam.z+cam.y});
+const snapV = v => Math.round(v/20)*20;
+const maybeSnap = p => grid.snap ? {x:snapV(p.x), y:snapV(p.y)} : p;
+
+/* ---------- Рендер ---------- */
+let needsRender = true;
+const invalidate = ()=>{ needsRender = true; };
+
+function loop(now){
+  const laserActive = laserPts.length && (now - laserPts[laserPts.length-1].t < 1100);
+  if(needsRender || laserActive){ render(now); needsRender=false; }
+  requestAnimationFrame(loop);
+}
+
+function render(now){
+  /* основной холст: фон, сетка, фигуры */
+  bctx.setTransform(dpr,0,0,dpr,0,0);
+  bctx.fillStyle = BOARD_BG[boardTheme];
+  bctx.fillRect(0,0,W,H);
+  bctx.setTransform(cam.z*dpr,0,0,cam.z*dpr, cam.x*dpr, cam.y*dpr);
+  if(grid.show) drawGrid(bctx);
+  for(const s of shapes) drawShape(bctx, s);
+
+  /* верхний холст: черновики, выделение, эффекты */
+  octx.setTransform(dpr,0,0,dpr,0,0);
+  octx.clearRect(0,0,W,H);
+  octx.setTransform(cam.z*dpr,0,0,cam.z*dpr, cam.x*dpr, cam.y*dpr);
+  if(draft) drawShape(octx, draft);
+  if(polygonDraft) drawPolylinePreview(octx);
+  if(hoverShape && tool==='select' && !action && !selection.has(hoverShape)) drawHover(octx, hoverShape);
+
+  octx.setTransform(dpr,0,0,dpr,0,0);
+  if(action && action.type==='rubber') drawRubber(octx, action);
+  drawSelectionUI(octx);
+  if(polygonDraft && polygonDraft.points.length && lastMouse.inside) drawPolyHUD(octx);
+  if(tool==='eraser' && lastMouse.inside) drawEraserCursor(octx);
+  drawLaser(octx, now);
+  if(editing) positionEditor();
+
+  /* видимость подсказки пустого холста */
+  const showHint = !shapes.length && !draft && !polygonDraft && !editing;
+  if(showHint !== hintVisible){ hintVisible=showHint; $('#emptyHint').classList.toggle('hidden', !showHint); }
+}
+let hintVisible = true;
+
+function drawGrid(ctx){
+  let step = 20;
+  while(step*cam.z < 16) step *= 2;               // адаптивная плотность точек
+  const x0 = Math.floor((-cam.x/cam.z)/step)*step;
+  const y0 = Math.floor((-cam.y/cam.z)/step)*step;
+  const x1 = (W-cam.x)/cam.z, y1 = (H-cam.y)/cam.z;
+  ctx.fillStyle = GRID_DOT[boardTheme];
+  const r = 2.4/cam.z;
+  for(let x=x0; x<=x1; x+=step)
+    for(let y=y0; y<=y1; y+=step)
+      ctx.fillRect(x-r/2, y-r/2, r, r);
+}
+
+function drawShape(ctx, s){
+  ctx.save();
+  ctx.globalAlpha = s.opacity;
+  ctx.lineWidth = s.width;
+  ctx.strokeStyle = s.stroke;
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.setLineDash(DASH[s.dash] ? DASH[s.dash](s.width) : []);
+  const hasFill = s.fill && FILLABLE.has(s.type);
+
+  switch(s.type){
+    case 'path': {
+      const pts=s.points;
+      ctx.beginPath();
+      if(pts.length===1){
+        ctx.fillStyle=s.stroke;
+        ctx.arc(pts[0].x, pts[0].y, Math.max(s.width/2,0.6), 0, TAU);
+        ctx.fill();
+      } else {
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for(let i=1;i<pts.length-1;i++){
+          const mx=(pts[i].x+pts[i+1].x)/2, my=(pts[i].y+pts[i+1].y)/2;
+          ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+        }
+        const last=pts[pts.length-1];
+        ctx.lineTo(last.x, last.y);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'polyline': {
+      const pts=s.points;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+      break;
+    }
+    case 'line':
+      ctx.beginPath(); ctx.moveTo(s.x1,s.y1); ctx.lineTo(s.x2,s.y2); ctx.stroke();
+      break;
+    case 'arrow': {
+      ctx.beginPath(); ctx.moveTo(s.x1,s.y1); ctx.lineTo(s.x2,s.y2); ctx.stroke();
+      const a=Math.atan2(s.y2-s.y1, s.x2-s.x1);
+      const len=Math.max(9, s.width*3.2);
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(s.x2,s.y2);
+      ctx.lineTo(s.x2-len*Math.cos(a-0.44), s.y2-len*Math.sin(a-0.44));
+      ctx.moveTo(s.x2,s.y2);
+      ctx.lineTo(s.x2-len*Math.cos(a+0.44), s.y2-len*Math.sin(a+0.44));
+      ctx.stroke();
+      break;
+    }
+    case 'rect':
+      if(hasFill){ ctx.fillStyle=s.fill; ctx.fillRect(s.x,s.y,s.w,s.h); }
+      ctx.strokeRect(s.x,s.y,s.w,s.h);
+      break;
+    case 'ellipse':
+      ctx.beginPath();
+      ctx.ellipse(s.cx, s.cy, Math.max(s.rx,0.01), Math.max(s.ry,0.01), 0, 0, TAU);
+      if(hasFill){ ctx.fillStyle=s.fill; ctx.fill(); }
+      ctx.stroke();
+      break;
+    case 'triangle': {
+      ctx.beginPath();
+      ctx.moveTo(s.x+s.w/2, s.y);
+      ctx.lineTo(s.x+s.w, s.y+s.h);
+      ctx.lineTo(s.x, s.y+s.h);
+      ctx.closePath();
+      if(hasFill){ ctx.fillStyle=s.fill; ctx.fill(); }
+      ctx.stroke();
+      break;
+    }
+    case 'text': {
+      ctx.fillStyle = s.stroke;
+      ctx.font = `500 ${s.size}px "JetBrains Mono", monospace`;
+      ctx.textBaseline = 'top';
+      const lines = s.text.split('\n');
+      lines.forEach((ln,i)=>ctx.fillText(ln, s.x, s.y + i*s.size*1.35));
+      break;
+    }
+  }
+  ctx.restore();
+}
+
+/* ---------- Габариты и трансформации фигур ---------- */
+function getBounds(s){
+  switch(s.type){
+    case 'rect': case 'triangle': return {x:s.x, y:s.y, w:s.w, h:s.h};
+    case 'ellipse': return {x:s.cx-s.rx, y:s.cy-s.ry, w:s.rx*2, h:s.ry*2};
+    case 'line': case 'arrow':
+      return {x:Math.min(s.x1,s.x2), y:Math.min(s.y1,s.y2), w:Math.abs(s.x2-s.x1), h:Math.abs(s.y2-s.y1)};
+    case 'path': case 'polyline': {
+      let x1=Infinity,y1=Infinity,x2=-Infinity,y2=-Infinity;
+      for(const p of s.points){
+        if(p.x<x1)x1=p.x; if(p.y<y1)y1=p.y;
+        if(p.x>x2)x2=p.x; if(p.y>y2)y2=p.y;
+      }
+      return {x:x1,y:y1,w:x2-x1,h:y2-y1};
+    }
+    case 'text': {
+      bctx.save();
+      bctx.font=`500 ${s.size}px "JetBrains Mono", monospace`;
+      let w=0;
+      for(const ln of s.text.split('\n')) w=Math.max(w, bctx.measureText(ln).width);
+      bctx.restore();
+      const h=s.text.split('\n').length*s.size*1.35;
+      return {x:s.x, y:s.y, w, h};
+    }
+  }
+}
+function setBounds(s, nb){
+  const ob=getBounds(s);
+  const sx = ob.w>0.001 ? nb.w/ob.w : 1;
+  const sy = ob.h>0.001 ? nb.h/ob.h : 1;
+  const mx = x => nb.x + (x-ob.x)*sx;
+  const my = y => nb.y + (y-ob.y)*sy;
+  switch(s.type){
+    case 'rect': case 'triangle': s.x=nb.x; s.y=nb.y; s.w=nb.w; s.h=nb.h; break;
+    case 'ellipse': s.cx=nb.x+nb.w/2; s.cy=nb.y+nb.h/2; s.rx=nb.w/2; s.ry=nb.h/2; break;
+    case 'line': case 'arrow': s.x1=mx(s.x1); s.y1=my(s.y1); s.x2=mx(s.x2); s.y2=my(s.y2); break;
+    case 'path': case 'polyline': s.points.forEach(p=>{p.x=mx(p.x); p.y=my(p.y);}); break;
+    case 'text': s.x=nb.x; s.y=nb.y; s.size=Math.max(6, s.size*sy); break;
+  }
+}
+function translateShape(s, dx, dy){
+  switch(s.type){
+    case 'rect': case 'triangle': s.x+=dx; s.y+=dy; break;
+    case 'ellipse': s.cx+=dx; s.cy+=dy; break;
+    case 'line': case 'arrow': s.x1+=dx; s.y1+=dy; s.x2+=dx; s.y2+=dy; break;
+    case 'path': case 'polyline': s.points.forEach(p=>{p.x+=dx; p.y+=dy;}); break;
+    case 'text': s.x+=dx; s.y+=dy; break;
+  }
+}
+
+/* ---------- Хит-тест ---------- */
+function hitShape(s, wx, wy, tol){
+  const lw = (s.width||4)/2 + tol;
+  switch(s.type){
+    case 'path': case 'polyline': {
+      const pts=s.points;
+      if(pts.length===1) return Math.hypot(wx-pts[0].x, wy-pts[0].y) < lw+3;
+      for(let i=0;i<pts.length-1;i++)
+        if(segDist(wx,wy,pts[i].x,pts[i].y,pts[i+1].x,pts[i+1].y) < lw) return true;
+      return false;
+    }
+    case 'line': case 'arrow':
+      return segDist(wx,wy,s.x1,s.y1,s.x2,s.y2) < lw;
+    case 'rect': {
+      const outer = wx>s.x-lw && wx<s.x+s.w+lw && wy>s.y-lw && wy<s.y+s.h+lw;
+      if(!outer) return false;
+      if(s.fill) return true;
+      return !(wx>s.x+lw && wx<s.x+s.w-lw && wy>s.y+lw && wy<s.y+s.h-lw);
+    }
+    case 'ellipse': {
+      const rx=Math.max(s.rx,0.01), ry=Math.max(s.ry,0.01);
+      const nx=(wx-s.cx)/rx, ny=(wy-s.cy)/ry;
+      const d=Math.hypot(nx,ny);
+      if(s.fill) return d <= 1 + lw/Math.min(rx,ry);
+      return Math.abs(d-1)*Math.min(rx,ry) < lw;
+    }
+    case 'triangle': {
+      const p=[{x:s.x+s.w/2,y:s.y},{x:s.x+s.w,y:s.y+s.h},{x:s.x,y:s.y+s.h}];
+      if(s.fill && pointInPoly(wx,wy,p)) return true;
+      return segDist(wx,wy,p[0].x,p[0].y,p[1].x,p[1].y)<lw ||
+             segDist(wx,wy,p[1].x,p[1].y,p[2].x,p[2].y)<lw ||
+             segDist(wx,wy,p[2].x,p[2].y,p[0].x,p[0].y)<lw;
+    }
+    case 'text': {
+      const b=getBounds(s);
+      return wx>b.x-tol && wx<b.x+b.w+tol && wy>b.y-tol && wy<b.y+b.h+tol;
+    }
+  }
+  return false;
+}
+function topShapeAt(w){
+  for(let i=shapes.length-1;i>=0;i--)
+    if(hitShape(shapes[i], w.x, w.y, 6/cam.z)) return shapes[i];
+  return null;
+}
+
+/* ---------- Ручки масштабирования ---------- */
+function getHandles(s){
+  const b=getBounds(s);
+  const {x,y,w,h}=b;
+  return [
+    {id:'nw',x, y},      {id:'n',x:x+w/2,y},      {id:'ne',x:x+w,y},
+    {id:'e', x:x+w, y:y+h/2},                      {id:'se',x:x+w,y:y+h},
+    {id:'s', x:x+w/2, y:y+h},                      {id:'sw',x, y:y+h},
+    {id:'w', x, y:y+h/2},
+  ];
+}
+function handleAt(s, sx, sy){
+  for(const h of getHandles(s)){
+    const p=screenOf(h.x,h.y);
+    if(Math.hypot(p.x-sx, p.y-sy) < 10) return h.id;
+  }
+  return null;
+}
+function resizeBounds(ob, handle, mx, my){
+  let L=ob.x, T=ob.y, R=ob.x+ob.w, B=ob.y+ob.h;
+  if(handle.includes('w')) L=Math.min(mx, R-4);
+  if(handle.includes('e')) R=Math.max(mx, L+4);
+  if(handle.includes('n')) T=Math.min(my, B-4);
+  if(handle.includes('s')) B=Math.max(my, T+4);
+  return {x:L, y:T, w:R-L, h:B-T};
+}
+
+/* ---------- История (undo/redo) + автосохранение ---------- */
+const history = {undo:[], redo:[]};
+let preAction = null;          // отложенный снапшот «до жеста»
+
+/* Автосохранение сессии в localStorage — доска переживёт перезагрузку */
+const LS_KEY = 'pixi_school_board_v1';
+let saveTimer=null;
+function scheduleSave(){
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>{
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(shapes)); }catch(_){}
+  }, 350);
+}
+
+function beginActionSnapshot(){ preAction = structuredClone(shapes); }
+function markActionDirty(){
+  if(preAction){
+    history.undo.push(preAction);
+    if(history.undo.length>80) history.undo.shift();
+    history.redo.length=0;
+    preAction=null;
+    updateHistoryUI();
+  }
+  scheduleSave();
+}
+function cancelActionSnapshot(){ preAction=null; }
+function pushHistory(){
+  history.undo.push(structuredClone(shapes));
+  if(history.undo.length>80) history.undo.shift();
+  history.redo.length=0;
+  updateHistoryUI();
+  scheduleSave();
+}
+function undo(){
+  if(!history.undo.length) return;
+  history.redo.push(structuredClone(shapes));
+  shapes = history.undo.pop();
+  afterHistory();
+}
+function redo(){
+  if(!history.redo.length) return;
+  history.undo.push(structuredClone(shapes));
+  shapes = history.redo.pop();
+  afterHistory();
+}
+function afterHistory(){
+  if(editing) cancelEditor();
+  selection.clear(); hoverShape=null; draft=null; polygonDraft=null;
+  updateHistoryUI(); updateStatus(); updatePropsUI(); invalidate();
+  scheduleSave();
+}
+function updateHistoryUI(){
+  $('#btnUndo').disabled = !history.undo.length;
+  $('#btnRedo').disabled = !history.redo.length;
+}
+
+/* ---------- Построение фигур-черновиков ---------- */
+function figureBBox(x0,y0,x1,y1,shift,alt){
+  let dx=x1-x0, dy=y1-y0;
+  if(shift){
+    const m=Math.max(Math.abs(dx),Math.abs(dy));
+    dx=(dx<0?-1:1)*m; dy=(dy<0?-1:1)*m;
+  }
+  if(alt) return {x:x0-Math.abs(dx), y:y0-Math.abs(dy), w:Math.abs(dx)*2, h:Math.abs(dy)*2};
+  return {x:Math.min(x0,x0+dx), y:Math.min(y0,y0+dy), w:Math.abs(dx), h:Math.abs(dy)};
+}
+function updateFigureDraft(wx, wy, shift, alt){
+  const {x0,y0}=action;
+  const p=maybeSnap({x:wx,y:wy});
+  let x1=p.x, y1=p.y;
+
+  if((action.tool==='line'||action.tool==='arrow') && shift){   // углы кратно 45°
+    const a=Math.atan2(y1-y0, x1-x0), st=Math.PI/4;
+    const sn=Math.round(a/st)*st, len=Math.hypot(x1-x0, y1-y0);
+    x1=x0+Math.cos(sn)*len; y1=y0+Math.sin(sn)*len;
+  }
+  const base = {
+    stroke:props.stroke, width:props.width, dash:props.dash,
+    opacity:props.opacity, fill:null, id:nid(),
+  };
+  if(action.tool==='line' || action.tool==='arrow'){
+    draft={...base, type:action.tool, x1:x0, y1:y0, x2:x1, y2:y1};
+  } else {
+    const b=figureBBox(x0,y0,x1,y1, shift, alt);
+    if(action.tool==='rect')        draft={...base, type:'rect', x:b.x, y:b.y, w:b.w, h:b.h, fill:props.fill};
+    else if(action.tool==='triangle')draft={...base, type:'triangle', x:b.x, y:b.y, w:b.w, h:b.h, fill:props.fill};
+    else                            draft={...base, type:'ellipse', cx:b.x+b.w/2, cy:b.y+b.h/2, rx:b.w/2, ry:b.h/2, fill:props.fill};
+  }
+}
+
+/* ---------- Полилиния ----------
+   Shift при постановке точки прижимает следующий сегмент к лучам
+   с шагом 45° (как у линий/стрелок). Если включена магнитная сетка,
+   длина сегмента дополнительно округляется к шагу сетки. */
+function constrainPolyPoint(w, shift){
+  const pts=polygonDraft && polygonDraft.points;
+  if(!(shift && pts && pts.length)) return maybeSnap(w);
+  const last=pts[pts.length-1];
+  const dx=w.x-last.x, dy=w.y-last.y;
+  if(Math.hypot(dx,dy) < 4/cam.z) return {x:last.x, y:last.y};   // «нулевая» точка не ставится
+  const st=Math.PI/4;
+  const sn=Math.round(Math.atan2(dy,dx)/st)*st;                  // ближайший луч из 8
+  let len=Math.hypot(dx,dy);
+  if(grid.snap) len=snapV(len);                                  // длина — кратна шагу сетки
+  return {x:last.x+Math.cos(sn)*len, y:last.y+Math.sin(sn)*len};
+}
+function addPolylinePoint(w, shift=false){
+  if(!polygonDraft) polygonDraft={points:[]};
+  const pts=polygonDraft.points;
+  const p=constrainPolyPoint(w, shift);
+  const last=pts[pts.length-1];
+  if(last && Math.hypot(p.x-last.x, p.y-last.y) < 4/cam.z) return;
+  pts.push({x:p.x, y:p.y});
+  invalidate();
+}
+function finishPolyline(){
+  if(!polygonDraft) return;
+  const pts=polygonDraft.points;
+  if(pts.length>=2){
+    pushHistory();
+    shapes.push({id:nid(), type:'polyline', points:pts,
+      stroke:props.stroke, width:props.width, dash:props.dash, opacity:props.opacity, fill:null});
+    updateStatus();
+  }
+  polygonDraft=null; invalidate();
+}
+function cancelPolyline(){ polygonDraft=null; invalidate(); }
+
+/* ---------- Текстовый редактор ----------
+   Ключевая проблема прошлой версии: после клика по холсту браузер
+   генерирует mousedown, который по умолчанию отбирает фокус у поля
+   ввода → blur → мгновенное закрытие пустого редактора.
+   Решение — многослойная защита (см. пометки FIX). */
+const editor=$('#textEditor'), editorHint=$('#editorHint');
+let editing=null;         // {shape} | {x,y} — редактируемая фигура или точка нового текста
+let suppressCommit=false;
+let blurCommitTimer=null;
+
+function openTextEditor(wx, wy, existing){
+  suppressCommit=false;                                  // FIX: сброс возможного устаревшего флага
+  if(existing){
+    editing={shape:existing};
+    editor.value=existing.text;
+  } else {
+    editing={x:wx, y:wy};
+    editor.value='';
+  }
+  const sh=existing || {x:wx, y:wy, size:props.size, stroke:props.stroke};
+  editor.style.fontSize=(sh.size*cam.z)+'px';
+  editor.style.color=sh.stroke;
+  editor.style.display='block';
+  editorHint.style.display='block';
+  positionEditor();
+  autosizeEditor();
+  editor.focus({preventScroll:true});
+  const len=editor.value.length;
+  editor.setSelectionRange(len,len);                     // каретка — в конец текста
+  /* FIX (страховка): если браузер всё же отдаст фокус холсту после клика — вернём его */
+  setTimeout(()=>{ if(editing) editor.focus({preventScroll:true}); }, 0);
+  invalidate();
+}
+function positionEditor(){
+  if(!editing) return;
+  const sh=editing.shape || editing;
+  const p=screenOf(sh.x, sh.y);
+  editor.style.left=p.x+'px';
+  editor.style.top=p.y+'px';
+  const fs=((editing.shape?editing.shape.size:props.size)*cam.z)+'px';
+  if(editor.style.fontSize!==fs){                        // подстройка при зуме во время правки
+    editor.style.fontSize=fs;
+    autosizeEditor();
+  }
+  /* подсказка над полем (или под ним, если поле у верхнего края) */
+  const below = p.y < 46;
+  editorHint.style.top=(below ? p.y+editor.offsetHeight+10 : p.y-32)+'px';
+  editorHint.style.left=clamp(p.x, 8, Math.max(8, W-editorHint.offsetWidth-8))+'px';
+}
+function autosizeEditor(){
+  editor.style.width='20px';
+  editor.style.height='auto';
+  editor.style.width=Math.max(48, editor.scrollWidth+8)+'px';
+  editor.style.height=(editor.scrollHeight+4)+'px';
+}
+function commitTextEditor(){
+  if(!editing) return;
+  const txt=editor.value.replace(/^\n+|\n+$/g,'');
+  if(editing.shape){
+    const s=editing.shape;
+    if(txt!==s.text){
+      pushHistory();
+      if(!txt){ shapes=shapes.filter(x=>x!==s); selection.delete(s); }
+      else s.text=txt;
+    }
+  } else if(txt){
+    pushHistory();
+    shapes.push({id:nid(), type:'text', x:editing.x, y:editing.y, text:txt,
+      size:props.size, stroke:props.stroke, width:0, dash:'solid', opacity:props.opacity, fill:null});
+  }
+  closeEditor();
+  updateStatus(); updatePropsUI(); invalidate();
+}
+function cancelEditor(){
+  if(!editing) return;
+  suppressCommit=true;
+  closeEditor();
+  invalidate();
+}
+function closeEditor(){
+  editing=null;
+  editor.style.display='none';
+  editorHint.style.display='none';
+  editor.value='';
+}
+/* FIX: коммит по blur больше не мгновенный — короткая пауза даёт шанс
+   вернуть фокус (например, при клике холстом с активным «Текстом»),
+   и срабатывает только если поле действительно осталось без фокуса */
+editor.addEventListener('blur', ()=>{
+  if(suppressCommit){ suppressCommit=false; return; }
+  clearTimeout(blurCommitTimer);
+  blurCommitTimer=setTimeout(()=>{
+    blurCommitTimer=null;
+    if(editing && document.activeElement!==editor) commitTextEditor();
+  }, 120);
+});
+editor.addEventListener('focus', ()=>{
+  suppressCommit=false;
+  clearTimeout(blurCommitTimer); blurCommitTimer=null;
+});
+editor.addEventListener('input', autosizeEditor);
+editor.addEventListener('keydown', e=>{
+  e.stopPropagation();
+  if(e.key==='Escape'){ e.preventDefault(); cancelEditor(); }
+  else if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); commitTextEditor(); }
+});
+/* FIX: фиксация текста при клике на ЛЮБОЙ элемент вне поля — на фазе перехвата,
+   чтобы коммит случился раньше остальных обработчиков (например, экспорта) */
+document.addEventListener('pointerdown', e=>{
+  if(editing && !editor.contains(e.target)) commitTextEditor();
+}, true);
+
+/* ---------- Лазерная указка ---------- */
+const laserPts=[];
+function drawLaser(ctx, now){
+  if(!laserPts.length) return;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.lineCap='round';
+  const LIFE=900;
+  for(let i=1;i<laserPts.length;i++){
+    const a=laserPts[i-1], b=laserPts[i];
+    const k=1-(now-b.t)/LIFE;
+    if(k<=0) continue;
+    ctx.strokeStyle=`rgba(143,75,255,${(0.9*k).toFixed(3)})`;
+    ctx.lineWidth=2+3*k;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
+  const h=laserPts[laserPts.length-1];
+  const k=1-(now-h.t)/LIFE;
+  if(k>0){
+    ctx.fillStyle=`rgba(143,75,255,${k.toFixed(3)})`;
+    ctx.shadowColor='rgba(143,75,255,.9)';
+    ctx.shadowBlur=16*k;
+    ctx.beginPath(); ctx.arc(h.x, h.y, 5.5*k+1.5, 0, TAU); ctx.fill();
+    ctx.shadowBlur=0;
+  }
+  while(laserPts.length && now-laserPts[0].t > LIFE+60) laserPts.shift();
+}
+
+/* ---------- Оверлей: выделение, рамки, курсоры ---------- */
+function drawHover(ctx, s){
+  const b=getBounds(s), m=3/cam.z;
+  ctx.save();
+  ctx.strokeStyle='rgba(143,75,255,.45)';
+  ctx.lineWidth=1.5/cam.z;
+  ctx.setLineDash([5/cam.z, 4/cam.z]);
+  ctx.strokeRect(b.x-m, b.y-m, b.w+m*2, b.h+m*2);
+  ctx.restore();
+}
+function drawRubber(ctx, a){
+  const p1=screenOf(Math.min(a.x0,a.x1), Math.min(a.y0,a.y1));
+  const p2=screenOf(Math.max(a.x0,a.x1), Math.max(a.y0,a.y1));
+  ctx.save();
+  ctx.fillStyle='rgba(143,75,255,.06)';
+  ctx.strokeStyle='rgba(143,75,255,.8)';
+  ctx.lineWidth=1.2; ctx.setLineDash([6,4]);
+  ctx.fillRect(p1.x,p1.y,p2.x-p1.x,p2.y-p1.y);
+  ctx.strokeRect(p1.x,p1.y,p2.x-p1.x,p2.y-p1.y);
+  ctx.restore();
+}
+function drawSelectionUI(ctx){
+  if(!selection.size) return;
+  ctx.save();
+  ctx.setLineDash([5,4]);
+  ctx.strokeStyle='rgba(143,75,255,.9)';
+  ctx.lineWidth=1.4;
+  for(const s of selection){
+    const b=getBounds(s);
+    const p1=screenOf(b.x,b.y), p2=screenOf(b.x+b.w, b.y+b.h);
+    ctx.strokeRect(p1.x-3, p1.y-3, p2.x-p1.x+6, p2.y-p1.y+6);
+  }
+  ctx.setLineDash([]);
+  if(selection.size===1){
+    const s=[...selection][0];
+    for(const h of getHandles(s)){
+      const p=screenOf(h.x,h.y);
+      ctx.fillStyle='#fff';
+      ctx.strokeStyle=ACCENT;
+      ctx.lineWidth=1.6;
+      ctx.beginPath();
+      ctx.roundRect(p.x-4.5, p.y-4.5, 9, 9, 2.5);
+      ctx.fill(); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+function drawEraserCursor(ctx){
+  ctx.save();
+  ctx.strokeStyle='rgba(143,75,255,.85)';
+  ctx.fillStyle='rgba(143,75,255,.07)';
+  ctx.lineWidth=1.4;
+  ctx.beginPath(); ctx.arc(lastMouse.sx, lastMouse.sy, 11, 0, TAU);
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+function drawPolylinePreview(ctx){
+  const pts=polygonDraft.points;
+  if(!pts.length) return;
+  ctx.save();
+  ctx.strokeStyle=props.stroke; ctx.lineWidth=props.width;
+  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.globalAlpha=props.opacity;
+  ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+  for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.stroke();
+  if(lastMouse.inside){                                    // «призрачный» сегмент к курсору — с учётом Shift
+    const gp=constrainPolyPoint({x:lastMouse.wx, y:lastMouse.wy}, lastMouse.shift);
+    ctx.globalAlpha=props.opacity*0.4;
+    ctx.beginPath();
+    ctx.moveTo(pts[pts.length-1].x, pts[pts.length-1].y);
+    ctx.lineTo(gp.x, gp.y);
+    ctx.stroke();
+  }
+  const r=4/cam.z;                                          // узлы
+  for(let i=0;i<pts.length;i++){
+    ctx.globalAlpha=1;
+    ctx.fillStyle=ACCENT;
+    ctx.strokeStyle='#fff'; ctx.lineWidth=1.5/cam.z;
+    ctx.beginPath(); ctx.arc(pts[i].x, pts[i].y, i===0?r+1/cam.z:r, 0, TAU);
+    ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+/* Живая шкала «длина · угол» рядом с курсором при построении полилинии */
+function drawPolyHUD(ctx){
+  const pts=polygonDraft.points;
+  const last=pts[pts.length-1];
+  const gp=constrainPolyPoint({x:lastMouse.wx, y:lastMouse.wy}, lastMouse.shift);
+  const len=Math.hypot(gp.x-last.x, gp.y-last.y);
+  if(len<2) return;
+  let a=Math.atan2(-(gp.y-last.y), gp.x-last.x)*180/Math.PI;    // математическая ось Y вверх
+  if(a<0) a+=360;
+  const label=`${Math.round(len)} px · ${Math.round(a)}°`;
+  ctx.save();
+  ctx.font='500 11px "JetBrains Mono", monospace';
+  const tw=ctx.measureText(label).width;
+  const x=clamp(lastMouse.sx+16, 8, W-tw-24);
+  const y=clamp(lastMouse.sy-38, 8, H-32);
+  ctx.fillStyle='rgba(11,9,16,.92)';
+  ctx.beginPath(); ctx.roundRect(x, y, tw+16, 22, 7); ctx.fill();
+  if(lastMouse.shift){                                        // Shift активен — подсвечиваем шкалу
+    ctx.strokeStyle=ACCENT; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.roundRect(x, y, tw+16, 22, 7); ctx.stroke();
+  }
+  ctx.fillStyle=lastMouse.shift?'#C9A8FF':'#D9D5E8';
+  ctx.textBaseline='middle';
+  ctx.fillText(label, x+8, y+11.5);
+  ctx.restore();
+}
+
+/* ---------- Жесты: pointer-события ---------- */
+function eraseAt(w){
+  const tol=10/cam.z;
+  for(let i=shapes.length-1;i>=0;i--){
+    if(hitShape(shapes[i], w.x, w.y, tol)){
+      markActionDirty();
+      selection.delete(shapes[i]);
+      shapes.splice(i,1);
+      updateStatus();
+    }
+  }
+}
+function moveSelection(w){
+  let dx=w.x-action.sx, dy=w.y-action.sy;
+  if(grid.snap){
+    dx=snapV(action.base.x+dx)-action.base.x;
+    dy=snapV(action.base.y+dy)-action.base.y;
+  }
+  const ddx=dx-action.lastDx, ddy=dy-action.lastDy;
+  if(!ddx && !ddy) return;
+  for(const s of selection) translateShape(s, ddx, ddy);
+  action.lastDx=dx; action.lastDy=dy;
+  if(!action.moved){ action.moved=true; markActionDirty(); }
+}
+function resizeSelection(w, shift){
+  let b=resizeBounds(action.ob, action.handle, w.x, w.y);
+  if(shift){                                                 // сохранить пропорции
+    const ob=action.ob, h=action.handle;
+    let k;
+    if(h==='n'||h==='s') k=b.h/ob.h;
+    else if(h==='e'||h==='w') k=b.w/ob.w;
+    else k=Math.max(b.w/ob.w, b.h/ob.h);
+    const kw=ob.w>1?4/ob.w:0, kh=ob.h>1?4/ob.h:0;
+    k=Math.max(k, kw, kh);
+    const nw=ob.w*k, nh=ob.h*k;
+    const ax=h.includes('w')?ob.x+ob.w:(h.includes('e')?ob.x:ob.x+ob.w/2);
+    const ay=h.includes('n')?ob.y+ob.h:(h.includes('s')?ob.y:ob.y+ob.h/2);
+    if(h==='n'||h==='s') b={x:ax-ob.w/2, y:h==='n'?ay-nh:ay, w:ob.w, h:nh};
+    else if(h==='e'||h==='w') b={x:h==='w'?ax-nw:ax, y:ay-ob.h/2, w:nw, h:ob.h};
+    else b={x:h.includes('w')?ax-nw:ax, y:h.includes('n')?ay-nh:ay, w:nw, h:nh};
+  }
+  setBounds(action.shape, b);
+  if(!action.moved){ action.moved=true; markActionDirty(); }
+}
+function finishRubber(additive){
+  const x0=Math.min(action.x0,action.x1), x1=Math.max(action.x0,action.x1);
+  const y0=Math.min(action.y0,action.y1), y1=Math.max(action.y0,action.y1);
+  if(x1-x0<3 && y1-y0<3){
+    if(!additive){ selection.clear(); updatePropsUI(); }
+    return;
+  }
+  if(!additive) selection.clear();
+  for(const s of shapes){
+    const b=getBounds(s);
+    if(b.x<x1 && b.x+b.w>x0 && b.y<y1 && b.y+b.h>y0) selection.add(s);
+  }
+  updatePropsUI();
+}
+
+overlay.addEventListener('pointerdown', e=>{
+  if(e.button!==0 && e.button!==1 && e.button!==2) return;
+  if(editing) commitTextEditor();
+
+  const sx=e.clientX, sy=e.clientY;
+  const w=worldOf(sx, sy);
+  lastMouse={sx,sy,wx:w.x,wy:w.y,inside:true,shift:e.shiftKey};
+
+  /* панорама: средняя/правая кнопка, пробел или инструмент «рука» */
+  if(e.button===1 || e.button===2 || spaceHeld || tool==='hand'){
+    action={type:'pan', sx, sy, cx:cam.x, cy:cam.y};
+    overlay.setPointerCapture(e.pointerId);
+    updateCursor(true);
+    return;
+  }
+
+  overlay.setPointerCapture(e.pointerId);
+
+  switch(tool){
+    case 'select': {
+      if(selection.size===1){
+        const s=[...selection][0];
+        const h=handleAt(s, sx, sy);
+        if(h){
+          beginActionSnapshot();
+          action={type:'resize', handle:h, shape:s, ob:getBounds(s), moved:false};
+          return;
+        }
+      }
+      const s=topShapeAt(w);
+      if(s){
+        if(e.shiftKey && selection.has(s)){ selection.delete(s); updatePropsUI(); invalidate(); return; }
+        if(!selection.has(s)){
+          if(!e.shiftKey) selection.clear();   // без Shift — заменить выделение, с Shift — добавить
+          selection.add(s);
+          updatePropsUI();
+        }
+        const first=[...selection][0];
+        beginActionSnapshot();
+        action={type:'move', sx:w.x, sy:w.y, base:getBounds(first), lastDx:0, lastDy:0, moved:false};
+      } else {
+        action={type:'rubber', x0:w.x, y0:w.y, x1:w.x, y1:w.y, additive:e.shiftKey};
+      }
+      break;
+    }
+    case 'pen': case 'marker': {
+      beginActionSnapshot();
+      const p=maybeSnap(w);
+      action={type:'draw-path'};
+      draft={id:nid(), type:'path', points:[{x:p.x,y:p.y}],
+        stroke:props.stroke, width:props.width, dash:props.dash, opacity:props.opacity, fill:null};
+      break;
+    }
+    case 'eraser':
+      beginActionSnapshot();
+      action={type:'erase'};
+      eraseAt(w);
+      break;
+    case 'line': case 'arrow': case 'rect': case 'ellipse': case 'triangle': {
+      const p=maybeSnap(w);
+      action={type:'figure', tool, x0:p.x, y0:p.y};
+      updateFigureDraft(p.x, p.y, false, false);
+      break;
+    }
+    case 'polyline':
+      addPolylinePoint(w, e.shiftKey);           // Shift — привязка к лучам 45°
+      break;
+    case 'text': {
+      /* FIX (главный): preventDefault на pointerdown запрещает совместимый mousedown,
+         который иначе отбирает фокус у только что открытого поля ввода */
+      e.preventDefault();
+      const hit=topShapeAt(w);
+      if(hit && hit.type==='text') openTextEditor(hit.x, hit.y, hit);   // клик по тексту — правка
+      else openTextEditor(w.x, w.y, null);                              // клик по холсту — новый текст
+      break;
+    }
+    case 'laser':
+      action={type:'laser'};
+      laserPts.push({x:sx, y:sy, t:performance.now()});
+      break;
+  }
+  invalidate();
+});
+
+overlay.addEventListener('pointermove', e=>{
+  const sx=e.clientX, sy=e.clientY;
+  const w=worldOf(sx, sy);
+  lastMouse={sx,sy,wx:w.x,wy:w.y,inside:true,shift:e.shiftKey};
+  $('#sbX').textContent=Math.round(w.x);
+  $('#sbY').textContent=Math.round(w.y);
+
+  if(!action){
+    if(tool==='select'){
+      const h=topShapeAt(w);
+      if(h!==hoverShape){ hoverShape=h; }
+    } else hoverShape=null;
+    invalidate();
+    return;
+  }
+
+  switch(action.type){
+    case 'pan':
+      cam.x=action.cx+(sx-action.sx);
+      cam.y=action.cy+(sy-action.sy);
+      break;
+    case 'draw-path': {
+      const pts=draft.points, last=pts[pts.length-1];
+      const p=maybeSnap(w);
+      if(Math.hypot(p.x-last.x, p.y-last.y) > 1.2/cam.z) pts.push(p);
+      break;
+    }
+    case 'figure':
+      updateFigureDraft(w.x, w.y, e.shiftKey, e.altKey);
+      break;
+    case 'erase':     eraseAt(w); break;
+    case 'laser':     laserPts.push({x:sx, y:sy, t:performance.now()}); break;
+    case 'move':      moveSelection(w); break;
+    case 'resize':    resizeSelection(w, e.shiftKey); break;
+    case 'rubber':    action.x1=w.x; action.y1=w.y; break;
+  }
+  invalidate();
+});
+
+overlay.addEventListener('pointerup', e=>{
+  if(!action) return;
+  const w=worldOf(e.clientX, e.clientY);
+
+  switch(action.type){
+    case 'draw-path':
+      if(draft && draft.points.length){
+        shapes.push(draft);
+        markActionDirty();
+        draft=null;
+      }
+      break;
+    case 'figure':
+      if(draft){
+        const b=getBounds(draft);
+        const ok=(draft.type==='line'||draft.type==='arrow')
+          ? Math.hypot(draft.x2-draft.x1, draft.y2-draft.y1)>4
+          : (b.w>2 && b.h>2);
+        if(ok){ shapes.push(draft); markActionDirty(); }
+        draft=null;
+      }
+      break;
+    case 'rubber':  finishRubber(action.additive); break;
+    case 'erase':   cancelActionSnapshot(); break;   // markActionDirty уже отработал при удалениях
+    default:        cancelActionSnapshot();
+  }
+  action=null;
+  updateCursor();
+  updateStatus();
+  invalidate();
+});
+
+overlay.addEventListener('pointercancel', ()=>{
+  action=null; draft=null; cancelActionSnapshot();
+  updateCursor(); invalidate();
+});
+overlay.addEventListener('pointerleave', ()=>{
+  lastMouse.inside=false; hoverShape=null; invalidate();
+});
+overlay.addEventListener('contextmenu', e=>e.preventDefault());
+window.addEventListener('contextmenu', e=>{
+  if(e.target.closest('canvas')) e.preventDefault();
+});
+
+overlay.addEventListener('dblclick', e=>{
+  const w=worldOf(e.clientX, e.clientY);
+  if(tool==='polyline'){ finishPolyline(); return; }
+  if(tool==='select'){
+    const s=topShapeAt(w);
+    if(s && s.type==='text'){ e.preventDefault(); openTextEditor(s.x, s.y, s); }
+  }
+});
+
+/* ---------- Зум и вид ---------- */
+function zoomAt(nz, cx, cy){
+  nz=clamp(nz, 0.15, 5);
+  const k=nz/cam.z;
+  cam.x=cx-(cx-cam.x)*k;
+  cam.y=cy-(cy-cam.y)*k;
+  cam.z=nz;
+  const label=Math.round(nz*100)+'%';
+  $('#sbZoom').textContent=label;
+  $('#btnZoomReset').textContent=label;
+  invalidate();
+}
+function resetZoom(){ zoomAt(1, W/2, H/2); }
+function resetView(){ cam.z=1; cam.x=W/2; cam.y=H/2; zoomAt(1, W/2, H/2); }
+function fitContent(){
+  if(!shapes.length){ resetView(); return; }
+  let x1=Infinity,y1=Infinity,x2=-Infinity,y2=-Infinity;
+  for(const s of shapes){
+    const b=getBounds(s);
+    x1=Math.min(x1,b.x); y1=Math.min(y1,b.y);
+    x2=Math.max(x2,b.x+b.w); y2=Math.max(y2,b.y+b.h);
+  }
+  const pad=70;
+  const z=clamp(Math.min(W/(x2-x1+pad*2), H/(y2-y1+pad*2)), 0.15, 2);
+  cam.z=z;
+  cam.x=W/2-(x1+x2)/2*z;
+  cam.y=H/2-(y1+y2)/2*z;
+  const label=Math.round(z*100)+'%';
+  $('#sbZoom').textContent=label;
+  $('#btnZoomReset').textContent=label;
+  invalidate();
+}
+overlay.addEventListener('wheel', e=>{
+  e.preventDefault();
+  const dy=e.deltaY*(e.deltaMode===1?33:1);
+  zoomAt(cam.z*Math.exp(-dy*0.0016), e.clientX, e.clientY);
+}, {passive:false});
+
+/* ---------- Действия с выделением ---------- */
+function deleteSelection(){
+  if(!selection.size) return;
+  if(editing && editing.shape && selection.has(editing.shape)) cancelEditor();
+  pushHistory();
+  shapes=shapes.filter(s=>!selection.has(s));
+  selection.clear();
+  updateStatus(); updatePropsUI(); invalidate();
+}
+function duplicateSelection(){
+  if(!selection.size) return;
+  pushHistory();
+  const clones=[...selection].map(s=>{
+    const c=structuredClone(s); c.id=nid();
+    translateShape(c, 16, 16);
+    return c;
+  });
+  shapes.push(...clones);
+  selection=new Set(clones);
+  updateStatus(); updatePropsUI(); invalidate();
+}
+function reorder(dir){
+  if(!selection.size) return;
+  pushHistory();
+  const list=dir>0 ? [...selection] : [...selection].reverse();
+  for(const s of list){
+    const i=shapes.indexOf(s);
+    shapes.splice(i,1);
+    if(dir>0) shapes.push(s); else shapes.unshift(s);
+  }
+  invalidate();
+}
+let lastNudge=0;
+function nudge(dx, dy){
+  if(!selection.size) return;
+  const now=performance.now();
+  if(now-lastNudge>600) pushHistory();      // схлопываем серию сдвигов в один шаг истории
+  lastNudge=now;
+  for(const s of selection) translateShape(s, dx, dy);
+  invalidate();
+}
+
+/* ---------- Инструменты ---------- */
+let markerSaved = null;
+function setTool(t){
+  if(editing) commitTextEditor();           // FIX: смена инструмента фиксирует набираемый текст
+  if(polygonDraft && t!=='polyline') cancelPolyline();
+  if(t==='marker' && tool!=='marker'){
+    markerSaved = {width:props.width, opacity:props.opacity};   // запомнить текущие настройки
+    props.width = Math.max(props.width, 14);                    // пресет маркера
+    props.opacity = 0.45;
+  } else if(tool==='marker' && t!=='marker' && markerSaved){
+    Object.assign(props, markerSaved);                          // вернуть настройки при уходе с маркера
+    markerSaved = null;
+  }
+  tool=t;
+  hoverShape=null;
+  selection.clear();
+  document.querySelectorAll('[data-tool]').forEach(b=>
+    b.classList.toggle('active', b.dataset.tool===t));
+  $('#sbHint').textContent=HINTS[t]||'';
+  updatePropsUI(); updateCursor(); updateStatus(); invalidate();
+}
+
+function updateCursor(grabbing){
+  let c='crosshair';
+  if(spaceHeld || tool==='hand') c=grabbing?'grabbing':'grab';
+  else if(tool==='select') c='default';
+  else if(tool==='text') c='text';
+  else if(tool==='eraser') c='none';
+  overlay.style.cursor=c;
+}
+
+/* ---------- Панель свойств ---------- */
+const PROP_VIS={
+  select:{stroke:1,fill:1,width:1,dash:1,opacity:1},
+  pen:{stroke:1,width:1,dash:1,opacity:1},
+  marker:{stroke:1,width:1,dash:1,opacity:1},
+  line:{stroke:1,width:1,dash:1,opacity:1},
+  arrow:{stroke:1,width:1,dash:1,opacity:1},
+  polyline:{stroke:1,width:1,dash:1,opacity:1},
+  rect:{stroke:1,fill:1,width:1,dash:1,opacity:1},
+  ellipse:{stroke:1,fill:1,width:1,dash:1,opacity:1},
+  triangle:{stroke:1,fill:1,width:1,dash:1,opacity:1},
+  text:{stroke:1,size:1,opacity:1},
+};
+
+function applyProp(key, val){
+  props[key]=val;
+  if(selection.size){
+    for(const s of selection){
+      if(key==='stroke') s.stroke=val;
+      else if(key==='width' && s.type!=='text') s.width=val;
+      else if(key==='size' && s.type==='text') s.size=val;
+      else if(key==='fill' && FILLABLE.has(s.type)) s.fill=val;
+      else if(key==='dash') s.dash=val;
+      else if(key==='opacity') s.opacity=val;
+    }
+  }
+  invalidate();
+}
+
+function applyColor(kind, color){
+  if(props[kind]===color && !selection.size) return;
+  if(selection.size) pushHistory();
+  applyProp(kind, color);
+  updatePropsUI();
+}
+
+function updatePropsUI(){
+  const conf=PROP_VIS[tool];
+  const panel=$('#propsPanel');
+  if(!conf){ panel.style.display='none'; return; }
+  panel.style.display='block';
+
+  /* заголовок */
+  $('#propsTitle').textContent = tool==='select'
+    ? (selection.size ? `Выделено: ${selection.size}` : 'Свойства')
+    : TOOL_NAMES[tool];
+
+  /* синхронизация значений с выделением (берём первую фигуру) */
+  if(selection.size){
+    const s=[...selection][0];
+    props.stroke=s.stroke;
+    props.width=s.type==='text'?props.width:s.width;
+    props.size=s.type==='text'?s.size:props.size;
+    props.dash=s.dash;
+    props.opacity=s.opacity;
+    props.fill=FILLABLE.has(s.type)?s.fill:null;
+  }
+
+  /* видимость секций */
+  const selArr=[...selection];
+  const showFill=conf.fill && (!selArr.length || selArr.some(s=>FILLABLE.has(s.type)));
+  $('#secFill').style.display = showFill?'block':'none';
+  $('#secStroke').style.display = conf.stroke?'block':'none';
+  $('#secDash').style.display = conf.dash?'block':'none';
+  $('#secOpacity').style.display = conf.opacity?'block':'none';
+  $('#secWidth').style.display = (conf.width||conf.size)?'block':'none';
+
+  const sizeMode = conf.size || (tool==='select' && selArr.length>0 && selArr.every(s=>s.type==='text'));
+  $('#widthLabel').textContent = sizeMode?'Размер текста':'Толщина';
+  $('#strokeLabel').textContent = sizeMode?'Цвет текста':'Цвет обводки';
+  const range=$('#widthRange');
+  if(sizeMode){ range.min=10; range.max=96; range.value=props.size; }
+  else { range.min=1; range.max=48; range.value=props.width; }
+  $('#widthVal').textContent=range.value;
+
+  $('#opacityRange').value=Math.round(props.opacity*100);
+  $('#opacityVal').textContent=Math.round(props.opacity*100)+'%';
+
+  /* активные свотчи */
+  document.querySelectorAll('#strokeSwatches .sw').forEach(b=>
+    b.classList.toggle('active', b.dataset.color===props.stroke));
+  const custom=$('#strokeSwatches .sw-custom');
+  custom.classList.toggle('active', !PALETTE.includes(props.stroke));
+  custom.querySelector('.cc').style.background = PALETTE.includes(props.stroke)?'var(--panel-solid)':props.stroke;
+
+  document.querySelectorAll('#fillSwatches .sw').forEach(b=>{
+    b.classList.toggle('active', b.dataset.color ? b.dataset.color===props.fill : props.fill===null);
+  });
+
+  document.querySelectorAll('.dash-btn').forEach(b=>
+    b.classList.toggle('active', b.dataset.dash===props.dash));
+}
+
+/* построение свотчей */
+function buildSwatches(){
+  const ss=$('#strokeSwatches'), fs=$('#fillSwatches');
+  PALETTE.forEach(c=>{
+    for(const cont of [ss,fs]){
+      const b=document.createElement('button');
+      b.className='sw'; b.dataset.color=c; b.style.background=c;
+      b.addEventListener('click', ()=>applyColor(cont===ss?'stroke':'fill', c));
+      cont.appendChild(b);
+    }
+  });
+  /* произвольный цвет для обводки */
+  const custom=document.createElement('label');
+  custom.className='sw sw-custom';
+  custom.innerHTML='<span class="cc"></span><input type="color" value="#241E33">';
+  let customTaken=false;
+  const inp=custom.querySelector('input');
+  inp.addEventListener('input', ()=>{
+    if(!customTaken){ if(selection.size) pushHistory(); customTaken=true; }
+    applyProp('stroke', inp.value);
+    updatePropsUI();
+  });
+  inp.addEventListener('change', ()=>{ customTaken=false; });
+  ss.appendChild(custom);
+
+  /* «без заливки» — первый слот */
+  const none=document.createElement('button');
+  none.className='sw sw-none';
+  none.addEventListener('click', ()=>applyColor('fill', null));
+  fs.insertBefore(none, fs.firstChild);
+}
+
+/* ---------- Слайдеры ---------- */
+for(const rid of ['widthRange','opacityRange']){
+  const r=$('#'+rid);
+  r.addEventListener('pointerdown', ()=>beginActionSnapshot());
+  r.addEventListener('input', ()=>{
+    markActionDirty();
+    if(rid==='widthRange'){
+      const sizeMode=$('#widthLabel').textContent==='Размер текста';
+      applyProp(sizeMode?'size':'width', +r.value);
+      $('#widthVal').textContent=r.value;
+    } else {
+      applyProp('opacity', +r.value/100);
+      $('#opacityVal').textContent=r.value+'%';
+    }
+  });
+  r.addEventListener('pointerup', ()=>cancelActionSnapshot());
+}
+document.querySelectorAll('.dash-btn').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    if(selection.size) pushHistory();
+    applyProp('dash', b.dataset.dash);
+    updatePropsUI();
+  });
+});
+
+/* пипетка (если браузер поддерживает) */
+const pickerBtn=$('#btnPicker');
+if('EyeDropper' in window){
+  pickerBtn.addEventListener('click', async ()=>{
+    try{
+      const res=await new EyeDropper().open();
+      applyColor('stroke', res.sRGBHex);
+    }catch(_){}
+  });
+} else pickerBtn.style.display='none';
+
+/* ---------- Клавиатура ---------- */
+document.addEventListener('keydown', e=>{
+  /* пока открыт диалог «Поделиться» — работает только Esc */
+  if(!$('#sharePop').hidden){
+    if(e.code==='Escape'){ e.preventDefault(); $('#sharePop').hidden=true; }
+    return;
+  }
+
+  const tag=document.activeElement?.tagName;
+  const typing = tag==='TEXTAREA' || tag==='INPUT';
+
+  if(e.code==='Escape' && !typing){
+    if(polygonDraft){ cancelPolyline(); return; }
+    if(editing){ cancelEditor(); return; }
+    if(!$('#helpPop').hidden){ $('#helpPop').hidden=true; return; }
+    selection.clear(); updatePropsUI(); invalidate();
+    return;
+  }
+  if(typing) return;
+
+  if(e.code==='Space' && !e.repeat){ spaceHeld=true; updateCursor(); e.preventDefault(); return; }
+
+  const tools={KeyV:'select',KeyH:'hand',KeyP:'pen',KeyB:'pen',KeyM:'marker',KeyE:'eraser',
+    KeyL:'line',KeyA:'arrow',KeyR:'rect',KeyO:'ellipse',KeyG:'triangle',KeyS:'polyline',
+    KeyT:'text',KeyK:'laser'};
+
+  if(e.ctrlKey || e.metaKey){
+    switch(e.code){
+      case 'KeyZ': e.preventDefault(); e.shiftKey?redo():undo(); return;
+      case 'KeyY': e.preventDefault(); redo(); return;
+      case 'KeyD': e.preventDefault(); duplicateSelection(); return;
+      case 'KeyE': e.preventDefault(); exportPNG(); return;
+      case 'BracketRight': e.preventDefault(); reorder(1); return;
+      case 'BracketLeft':  e.preventDefault(); reorder(-1); return;
+    }
+    return;
+  }
+
+  if(tools[e.code]){ setTool(tools[e.code]); return; }
+
+  switch(e.code){
+    case 'Enter': if(polygonDraft) finishPolyline(); break;
+    case 'Delete': case 'Backspace':
+      if(selection.size){ e.preventDefault(); deleteSelection(); }
+      break;
+    case 'Equal': zoomAt(cam.z*1.2, W/2, H/2); break;
+    case 'Minus': zoomAt(cam.z/1.2, W/2, H/2); break;
+    case 'Digit1': if(e.shiftKey) fitContent(); break;
+    case 'Digit2': if(e.shiftKey) resetZoom(); break;
+    case 'ArrowLeft':  e.preventDefault(); nudge(e.shiftKey?-10:-1, 0); break;
+    case 'ArrowRight': e.preventDefault(); nudge(e.shiftKey?10:1, 0); break;
+    case 'ArrowUp':    e.preventDefault(); nudge(0, e.shiftKey?-10:-1); break;
+    case 'ArrowDown':  e.preventDefault(); nudge(0, e.shiftKey?10:1); break;
+  }
+});
+document.addEventListener('keyup', e=>{
+  if(e.code==='Space'){ spaceHeld=false; updateCursor(); }
+});
+
+/* ---------- Верхняя панель ---------- */
+ $('#btnUndo').addEventListener('click', undo);
+ $('#btnRedo').addEventListener('click', redo);
+ $('#btnZoomIn').addEventListener('click', ()=>zoomAt(cam.z*1.25, W/2, H/2));
+ $('#btnZoomOut').addEventListener('click', ()=>zoomAt(cam.z/1.25, W/2, H/2));
+ $('#btnZoomReset').addEventListener('click', resetZoom);
+ $('#btnFit').addEventListener('click', fitContent);
+ $('#btnExport').addEventListener('click', exportPNG);
+
+ $('#btnGrid').addEventListener('click', ()=>{
+  grid.show=!grid.show;
+  $('#btnGrid').classList.toggle('on', grid.show);
+  invalidate();
+});
+ $('#btnSnap').addEventListener('click', ()=>{
+  grid.snap=!grid.snap;
+  $('#btnSnap').classList.toggle('on', grid.snap);
+  if(grid.snap && !grid.show){ grid.show=true; $('#btnGrid').classList.add('on'); }
+  invalidate();
+});
+ $('#btnTheme').addEventListener('click', ()=>{
+  boardTheme = boardTheme==='light' ? 'dark' : 'light';
+  document.body.classList.toggle('board-dark', boardTheme==='dark');
+  $('.ic-sun').style.display = boardTheme==='light'?'':'none';
+  $('.ic-moon').style.display = boardTheme==='dark'?'':'none';
+  invalidate();
+});
+
+/* очистка с подтверждением «в два клика» */
+let clearArmTimer=null;
+ $('#btnClear').addEventListener('click', ()=>{
+  const btn=$('#btnClear');
+  if(!btn.classList.contains('armed')){
+    btn.classList.add('armed');
+    clearArmTimer=setTimeout(()=>btn.classList.remove('armed'), 2600);
+    return;
+  }
+  clearTimeout(clearArmTimer);
+  btn.classList.remove('armed');
+  if(!shapes.length){ toast('Доска и так пуста'); return; }
+  pushHistory();
+  shapes=[];
+  if(editing) cancelEditor();
+  selection.clear(); draft=null; polygonDraft=null;
+  updateStatus(); updatePropsUI(); invalidate();
+  toast('Доска очищена', {label:'Отменить', fn:undo});
+});
+
+/* ---------- Шпаргалка ---------- */
+const helpPop=$('#helpPop');
+ $('#btnHelp').addEventListener('click', e=>{
+  e.stopPropagation();
+  helpPop.hidden=!helpPop.hidden;
+});
+ $('#helpClose').addEventListener('click', ()=>helpPop.hidden=true);
+document.addEventListener('pointerdown', e=>{
+  if(!helpPop.hidden && !helpPop.contains(e.target) && !$('#btnHelp').contains(e.target))
+    helpPop.hidden=true;
+});
+
+/* ---------- Тосты ---------- */
+function toast(msg, action){
+  const box=$('#toasts');
+  const el=document.createElement('div');
+  el.className='toast';
+  el.innerHTML=`<span>${msg}</span>`;
+  if(action){
+    const b=document.createElement('button');
+    b.textContent=action.label;
+    b.addEventListener('click', ()=>{ action.fn(); el.remove(); });
+    el.appendChild(b);
+  }
+  box.appendChild(el);
+  setTimeout(()=>{ el.classList.add('out'); setTimeout(()=>el.remove(), 220); }, 3800);
+}
+
+/* ---------- Экспорт PNG ---------- */
+function exportPNG(){
+  if(!shapes.length){ toast('Доска пуста — нечего экспортировать'); return; }
+  let x1=Infinity,y1=Infinity,x2=-Infinity,y2=-Infinity;
+  for(const s of shapes){
+    const b=getBounds(s);
+    x1=Math.min(x1,b.x); y1=Math.min(y1,b.y);
+    x2=Math.max(x2,b.x+b.w); y2=Math.max(y2,b.y+b.h);
+  }
+  const pad=48;
+  const bw=x2-x1+pad*2, bh=y2-y1+pad*2;
+  const z=clamp(1600/Math.max(bw,bh), 0.5, 2);
+  const c=document.createElement('canvas');
+  c.width=Math.round(bw*z); c.height=Math.round(bh*z);
+  const ctx=c.getContext('2d');
+  ctx.fillStyle=BOARD_BG[boardTheme];
+  ctx.fillRect(0,0,c.width,c.height);
+  ctx.setTransform(z,0,0,z,(pad-x1)*z,(pad-y1)*z);
+  for(const s of shapes) drawShape(ctx, s);
+  const a=document.createElement('a');
+  const d=new Date();
+  const p=n=>String(n).padStart(2,'0');
+  a.download=`pixi_school-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.png`;
+  a.href=c.toDataURL('image/png');
+  a.click();
+  toast('Изображение сохранено в PNG');
+}
+
+/* ============================================================
+   ПОДЕЛИТЬСЯ ДОСКОЙ
+   Механика: все фигуры сериализуются в JSON, сжимаются
+   deflate (CompressionStream) и кодируются в base64url прямо
+   в адресе ссылки (#b=...). Получатель открывает ссылку —
+   доска восстанавливается. Никакого сервера не требуется.
+   ============================================================ */
+
+function bytesToB64url(bytes){
+  let s='';
+  const CH=0x8000;
+  for(let i=0;i<bytes.length;i+=CH)
+    s+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH));
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function b64urlToBytes(str){
+  str=str.replace(/-/g,'+').replace(/_/g,'/');
+  while(str.length%4) str+='=';
+  const bin=atob(str);
+  const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  return bytes;
+}
+
+/* компактная упаковка фигуры: без id, координаты до 2 знаков */
+function packShape(s){
+  const r=v=>Math.round(v*100)/100;
+  const c={type:s.type, stroke:s.stroke, width:r(s.width), dash:s.dash, opacity:r(s.opacity), fill:s.fill??null};
+  for(const k of ['x','y','w','h','cx','cy','rx','ry','x1','y1','x2','y2','size'])
+    if(typeof s[k]==='number') c[k]=r(s[k]);
+  if(s.points) c.points=s.points.map(p=>({x:r(p.x), y:r(p.y)}));
+  if(typeof s.text==='string') c.text=s.text;
+  return c;
+}
+async function encodeBoard(){
+  const json=JSON.stringify(shapes.map(packShape));
+  const bytes=new TextEncoder().encode(json);
+  if('CompressionStream' in window){
+    const stream=new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+    const buf=new Uint8Array(await new Response(stream).arrayBuffer());
+    return 'z'+bytesToB64url(buf);        // z — сжатый формат
+  }
+  return 'r'+bytesToB64url(bytes);        // r — запасной, без сжатия
+}
+async function decodeBoard(payload){
+  const tag=payload[0], b64=payload.slice(1);
+  const bytes=b64urlToBytes(b64);
+  let json;
+  if(tag==='z' && 'DecompressionStream' in window){
+    const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    json=await new Response(stream).text();
+  } else if(tag==='r'){
+    json=new TextDecoder().decode(bytes);
+  } else throw new Error('bad payload');
+  return JSON.parse(json);
+}
+
+/* строгая валидация при импорте: битые данные не попадают на доску */
+const SHAPE_TYPES=new Set(['path','polyline','line','arrow','rect','ellipse','triangle','text']);
+const num = v => (typeof v==='number' && isFinite(v)) ? v : null;
+
+function reviveBoard(arr){
+  if(!Array.isArray(arr)) return null;
+  const out=[];
+  for(const o of arr){
+    if(!o || typeof o!=='object' || !SHAPE_TYPES.has(o.type)) continue;
+    const s={
+      id:nid(), type:o.type,
+      stroke:typeof o.stroke==='string'?o.stroke:'#241E33',
+      width:num(o.width)??3,
+      dash:DASH[o.dash]?o.dash:'solid',
+      opacity:num(o.opacity)??1,
+      fill:(o.fill===null||typeof o.fill==='string')?o.fill:null,
+    };
+    let ok=true;
+    switch(o.type){
+      case 'rect': case 'triangle':
+        ok=['x','y','w','h'].every(k=>num(o[k])!==null);
+        if(ok) Object.assign(s,{x:o.x,y:o.y,w:o.w,h:o.h});
+        break;
+      case 'ellipse':
+        ok=['cx','cy','rx','ry'].every(k=>num(o[k])!==null);
+        if(ok) Object.assign(s,{cx:o.cx,cy:o.cy,rx:o.rx,ry:o.ry});
+        break;
+      case 'line': case 'arrow':
+        ok=['x1','y1','x2','y2'].every(k=>num(o[k])!==null);
+        if(ok) Object.assign(s,{x1:o.x1,y1:o.y1,x2:o.x2,y2:o.y2});
+        break;
+      case 'path': case 'polyline':
+        ok=Array.isArray(o.points) && o.points.length>0 &&
+           o.points.every(p=>p && num(p.x)!==null && num(p.y)!==null);
+        if(ok) s.points=o.points.map(p=>({x:p.x, y:p.y}));
+        break;
+      case 'text':
+        ok=typeof o.text==='string' && o.text.trim()!=='' && num(o.size)!==null;
+        if(ok){ s.text=o.text; s.size=Math.max(6, o.size); }
+        break;
+    }
+    if(ok) out.push(s);
+  }
+  return out;
+}
+
+/* --- QR-код: подбор версии перебором (1..40) — не зависит от автоподбора библиотеки --- */
+function renderShareQR(url){
+  const wrap=$('#qrWrap'), cv=$('#qrCanvas');
+  if(typeof qrcode!=='function'){
+    wrap.hidden=true;
+    return 'QR-модуль не загрузился — передайте ссылку текстом';
+  }
+  let qr=null;
+  for(let t=1;t<=40 && !qr;t++){
+    try{
+      const q=qrcode(t,'M');
+      q.addData(url,'Byte');
+      q.make();
+      qr=q;
+    }catch(_){}
+  }
+  if(!qr){
+    wrap.hidden=true;
+    return 'Ссылка не помещается в QR-код — передайте её текстом';
+  }
+  const n=qr.getModuleCount(), quiet=4, m=n+quiet*2, S=432;
+  const cell=Math.max(1, Math.floor(S/m));
+  const dim=m*cell, off=Math.floor((S-dim)/2);
+  cv.width=S; cv.height=S;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle='#FFFFFF'; ctx.fillRect(0,0,S,S);
+  ctx.fillStyle='#241E33';
+  for(let r=0;r<n;r++)
+    for(let c=0;c<n;c++)
+      if(qr.isDark(r,c)) ctx.fillRect(off+(quiet+c)*cell, off+(quiet+r)*cell, cell, cell);
+  wrap.hidden=false;
+  return null;
+}
+
+/* --- диалог --- */
+let shareUrl='';
+async function openShareDialog(){
+  if(!shapes.length){ toast('Доска пуста — нечего передавать'); return; }
+  let payload;
+  try{ payload=await encodeBoard(); }
+  catch(_){ toast('Не удалось упаковать доску'); return; }
+
+  shareUrl=location.href.split('#')[0] + '#b=' + payload;
+  $('#shareLink').value=shareUrl;
+  $('#shareMeta').textContent=`Объектов: ${shapes.length} · ссылка ${shareUrl.length} символов`;
+
+  const warns=[];
+  if(location.protocol==='file:')
+    warns.push('Страница открыта локально (file://): ссылка откроется у другого человека только после того, как вы разместите этот файл в интернете — например, на GitHub Pages или школьном сервере.');
+  if(shareUrl.length>2000)
+    warns.push('Ссылка длинная — некоторые мессенджеры и почта могут её обрезать. Надёжнее передать через QR-код.');
+  const qrErr=renderShareQR(shareUrl);
+  if(qrErr) warns.push(qrErr);
+
+  const w=$('#shareWarn');
+  w.hidden=!warns.length;
+  w.innerHTML=warns.join('<br>');
+
+  $('#sharePop').hidden=false;
+  setTimeout(()=>$('#shareLink').select(), 30);
+}
+function closeShareDialog(){ $('#sharePop').hidden=true; }
+
+ $('#btnShare').addEventListener('click', openShareDialog);
+ $('#shareClose').addEventListener('click', closeShareDialog);
+ $('#sharePop').addEventListener('pointerdown', e=>{
+  if(e.target.id==='sharePop') closeShareDialog();
+});
+ $('#shareLink').addEventListener('focus', e=>e.target.select());
+ $('#btnCopyLink').addEventListener('click', async ()=>{
+  try{
+    await navigator.clipboard.writeText(shareUrl);
+    toast('Ссылка скопирована — отправьте её участникам');
+  }catch(_){
+    const inp=$('#shareLink');
+    inp.select();
+    if(document.execCommand && document.execCommand('copy')) toast('Ссылка скопирована');
+    else toast('Скопируйте ссылку из поля вручную');
+  }
+});
+
+/* --- импорт доски из ссылки + восстановление прошлой сессии --- */
+function cleanURL(){
+  try{ history.replaceState(null,'',location.pathname+location.search); }
+  catch(_){ location.hash=''; }
+}
+(async function initSharedBoard(){
+  const m=location.hash.match(/^#b=(.+)$/);
+  if(m){
+    const payload=decodeURIComponent(m[1]);
+    cleanURL();                                  // импортируем один раз, дальше — обычная доска
+    try{
+      const revived=reviveBoard(await decodeBoard(payload));
+      if(revived && revived.length){
+        shapes=revived;
+        updateStatus(); updatePropsUI();
+        fitContent(); invalidate(); scheduleSave();
+        toast(`Доска из ссылки загружена · объектов: ${revived.length}`);
+      } else {
+        toast('Ссылка не содержит фигур');
+      }
+    }catch(_){
+      toast('Не удалось прочитать ссылку — возможно, она обрезана при пересылке');
+    }
+    return;
+  }
+  /* обычный запуск: восстановить прошлую сессию, если была */
+  try{
+    const saved=localStorage.getItem(LS_KEY);
+    if(saved){
+      const revived=reviveBoard(JSON.parse(saved));
+      if(revived && revived.length){
+        shapes=revived;
+        updateStatus(); invalidate();
+        toast(`Восстановлена прошлая сессия · объектов: ${revived.length}`);
+      }
+    }
+  }catch(_){}
+})();
+
+/* ---------- Статус ---------- */
+function updateStatus(){
+  $('#sbCount').textContent=shapes.length;
+  updateHistoryUI();
+}
+
+/* ---------- Привязка кнопок инструментов ---------- */
+document.querySelectorAll('.tool-btn').forEach(b=>{
+  b.addEventListener('click', ()=>setTool(b.dataset.tool));
+});
+
+/* ---------- Инициализация ---------- */
+window.addEventListener('resize', resize);
+resize();
+cam.x=W/2; cam.y=H/2;                       // мировой ноль — в центре экрана
+
+buildSwatches();
+lucide.createIcons();
+ $('#btnGrid').classList.add('on');
+setTool('pen');
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
